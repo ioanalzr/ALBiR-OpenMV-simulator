@@ -15,9 +15,19 @@ class DetectableObject:
         self.y = y
         self.color_id = color_id  # 0 for blue, 1 for green, 2 for red, 3 for star
         self.detection_probability = 0.0
+        self._pixels = 0
+        self._cx = 0
+        self._cy = 0
 
     def update_detection_probability(self, robot_state, max_range, obstacles, bottom_fraction=1):
         raise NotImplementedError("This method should be implemented in subclasses")
+    
+    def cx(self):
+        return self._cx
+    def cy(self):
+        return self._cy
+    def pixels(self):
+        return self._pixels
 
 
 # Class for the grid cells
@@ -25,12 +35,13 @@ class GridCell(DetectableObject):
     def __init__(self, x, y, color_id):
         super().__init__(x, y, color_id)
 
+    
+    
     def update_detection_probability(self, robot_state, max_range, obstacles,cam,bottom_fraction=1):
         """
         Update the probability that this cell is detected by the robot based on
         its position relative to the robot and the robot's gaze direction.
         """
-        self.pixels = 0
         self.detection_probability = 1
         sensor_width =cam.w_centre * 2 # Width of the camera sensor in pixels
         sensor_height = cam.h_centre * 2  # Height of the camera sensor in pixels
@@ -39,7 +50,7 @@ class GridCell(DetectableObject):
         v_fov = cam.v_fov
         h_fov =  cam.h_fov
         gaze_dir = robot_state.theta + robot_state.phi
-        gaze_dir = (gaze_dir - 90) % 360
+        gaze_dir = (gaze_dir + 90) % 360
         if gaze_dir > 180:
                 gaze_dir -= 360  # Normalize to [-180, 180]
 
@@ -48,32 +59,37 @@ class GridCell(DetectableObject):
         min_distance = abs(camera_h*math.tan(math.radians(cam_elevation_angle+v_fov/2+90)))
          # Calculate distance from robot to this cell
         beta = math.degrees(math.atan(math.tan(math.radians(h_fov/2))*math.sqrt(camera_h**2+min_distance**2)/min_distance))
-        dx = abs(self.x - robot_state.x) # to centre of the cell
-        dy = abs(self.y - robot_state.y) # to centre of the cell
-        flat_distance = math.sqrt(dx ** 2 + dy ** 2)
+        dx = self.x - robot_state.x # to centre of the cell
+        dy = self.y - robot_state.y # to centre of the cell
+        flat_distance = math.sqrt(abs(dx) ** 2 + abs(dy) ** 2)
+   
+        
+        # Rotation matrix to rotate the grid cell coordinates by -gaze_dir around the robot's position
+        cos_gaze = math.cos(math.radians(-gaze_dir))
+        sin_gaze = math.sin(math.radians(-gaze_dir))
 
-      
-      
-        # relative_angle = (flat_angle_to_cell_deg - gaze_dir + 180) % 360
-        angle_to_cell_horizontal = math.degrees(math.atan2(dy, dx))
-        relative_angle_horizontal = (angle_to_cell_horizontal - gaze_dir + 180) % 360
-        if relative_angle_horizontal > 180:
-                relative_angle_horizontal -= 360 
+        # Apply the rotation matrix
+        rotated_x = cos_gaze * dx - sin_gaze * dy
+        rotated_y = sin_gaze * dx + cos_gaze * dy
+
+        # Now compute the angle based on the rotated coordinates
+        relative_angle_horizontal = math.degrees(math.atan2(rotated_y, rotated_x))
+        # print(relative_angle_horizontal)
       
 
         angle_to_cell_vertical = math.degrees(math.atan2(camera_h, flat_distance))  # Vertical angle
         angle_to_cell_vertical = angle_to_cell_vertical*-1 - cam_elevation_angle
     
-        self.pixels = max(0,  1 - (flat_distance - min_distance +  half_square_width)/(max_range-(min_distance+half_square_width))) # max pixels = 100
+        self._pixels = max(0,  1 - (flat_distance - min_distance +  half_square_width)/(max_range-(min_distance+half_square_width))) # max pixels = 100
         angle_to_closest_point_vertical = math.degrees(math.atan2(camera_h, flat_distance-half_square_width)) *-1 
         angle_to_farthest_point_vertical = math.degrees(math.atan2(camera_h, flat_distance+half_square_width)) *-1 
         if angle_to_farthest_point_vertical< cam_elevation_angle-v_fov/2 or angle_to_closest_point_vertical> cam_elevation_angle+v_fov/2:
             self.detection_probability = 0.0
-            self.pixels = 0
+            self._pixels = 0
             # print(f"Detection 0 for cell ({self.x}, {self.y}): Cell is outside vertical FOV. cam_elevation_angle-v_fov/2: {cam_elevation_angle-v_fov/2},cam_elevation_angle+v_fov/2: {cam_elevation_angle+v_fov/2}, angle_to_closest_point_vertical: {angle_to_closest_point_vertical}, angle_to_farthest_point_vertical: {angle_to_farthest_point_vertical}")
             return
         elif abs(angle_to_closest_point_vertical)>abs(cam_elevation_angle-v_fov/2):
-            self.pixels = self.pixels * (1-(abs(angle_to_closest_point_vertical)-abs(cam_elevation_angle-v_fov/2))/(abs(angle_to_closest_point_vertical)-abs(angle_to_farthest_point_vertical)))
+            self._pixels = self._pixels * (1-(abs(angle_to_closest_point_vertical)-abs(cam_elevation_angle-v_fov/2))/(abs(angle_to_closest_point_vertical)-abs(angle_to_farthest_point_vertical)))
         
         # Determine the coordinates of the four corners of the grid cell
 
@@ -96,7 +112,7 @@ class GridCell(DetectableObject):
             angle_to_corner_deg = math.degrees(angle_to_corner_rad)
 
             # Adjust the corner's angle with respect to the robot's gaze
-            relative_angle_corner = (angle_to_corner_deg - gaze_dir + 180) % 360
+            relative_angle_corner = (angle_to_corner_deg - gaze_dir  ) % 360
             if relative_angle_corner > 180:
                 relative_angle_corner -= 360  # Normalize to [-180, 180]
             
@@ -112,11 +128,11 @@ class GridCell(DetectableObject):
         max_angle =  max(abs(leftmost_angle),abs(rightmost_angle))
         if min_angle > abs(beta):
             self.detection_probability = 0.0
-            self.pixels = 0
+            self._pixels = 0
             # print(f"Detection 0 for cell ({self.x}, {self.y}): Cell is outside horizontal FOV. beta: {beta}, smallest angle: {leftmost_angle}, largest angle: {rightmost_angle}")
             return  # Cell is outside horizontal FOV
         elif max_angle > abs(beta):
-            self.pixels = self.pixels * (1-(max_angle-beta)/(max_angle-min_angle))
+            self._pixels = self._pixels * (1-(max_angle-beta)/(max_angle-min_angle))
         max_right_overlap = 0
         max_left_overlap = 0
         half_obs_width =3
@@ -133,17 +149,17 @@ class GridCell(DetectableObject):
                 obs_right_x = obs.x + math.cos(obs_direction - math.pi / 2) * half_obs_width
                 obs_right_y = obs.y + math.sin(obs_direction - math.pi / 2) * half_obs_width
 
-                obs_left_angle = (math.degrees(math.atan2(obs_left_y - robot_state.y, obs_left_x - robot_state.x))+180 - gaze_dir) % 360
+                obs_left_angle = (math.degrees(math.atan2(obs_left_y - robot_state.y, obs_left_x - robot_state.x)) - gaze_dir) % 360
                 if obs_left_angle > 180:
                     obs_left_angle -= 360  # Adjust to be between -180 and 180
 
-                obs_right_angle = (math.degrees(math.atan2(obs_right_y - robot_state.y, obs_right_x - robot_state.x))+180 - gaze_dir) % 360
+                obs_right_angle = (math.degrees(math.atan2(obs_right_y - robot_state.y, obs_right_x - robot_state.x)) - gaze_dir) % 360
                 if obs_right_angle > 180:
                     obs_right_angle -= 360  # Adjust to be between -180 and 180
                 leftmost_obs_angle, rightmost_obs_angle = min(obs_left_angle, obs_right_angle), max(obs_left_angle, obs_right_angle)
                 # print(f"({self.x}, {self.y}): rightmost_angle {rightmost_angle}, rightmost_obs_angle {rightmost_obs_angle},leftmost_angle {leftmost_angle}, leftmost_obs_angle {leftmost_obs_angle}")
                 if leftmost_obs_angle <= leftmost_angle and rightmost_obs_angle>= rightmost_angle:
-                    self.pixels = 0
+                    self._pixels = 0
                     self.detection_probability = 0
                     return
                 elif leftmost_angle <= leftmost_obs_angle and leftmost_obs_angle<= rightmost_angle:
@@ -154,16 +170,20 @@ class GridCell(DetectableObject):
                     left_overlap = abs(leftmost_angle-rightmost_obs_angle)/abs(leftmost_angle-rightmost_angle)
                     max_left_overlap= max(max_left_overlap,left_overlap)
             
-        self.pixels = self.pixels * (1-max_left_overlap) * (1-max_right_overlap)
-        if self.pixels == 0:
+        self._pixels = self._pixels * (1-max_left_overlap) * (1-max_right_overlap)
+        if self._pixels == 0:
             self.detection_probability = 0
         
 
-
-        self.cx = (sensor_width / 2) * (1 + relative_angle_horizontal/ beta)
-        self.cy = (sensor_height / 2) * (1 + math.radians(angle_to_cell_vertical) / math.radians(v_fov / 2))
-        # print(f"({self.x}, {self.y}): self.detection_probability {self.detection_probability}, flat_distance {flat_distance}, pixels {self.pixels}, left overlap {max_left_overlap}, right overlap {max_right_overlap}")
-
+        self._cx = (sensor_width / 2) * (1 + relative_angle_horizontal/ beta)
+        if self._cx>sensor_width:
+            self._cx = sensor_width
+        elif self._cx<-sensor_width:
+            self._cx = -   sensor_width
+        self._cy = (sensor_height / 2) * (1 + math.radians(angle_to_cell_vertical) / math.radians(v_fov / 2))
+        # print(f"({self.x}, {self.y}): self.detection_probability {self.detection_probability}, flat_distance {flat_distance}, pixels {self._pixels}, left overlap {max_left_overlap}, right overlap {max_right_overlap}")
+        # print(f"({self.x}, {self.y}), relative_angle_horizontal: {relative_angle_horizontal}, beta: {beta}, cx: {self._cx}")
+        
 
    
 
@@ -180,7 +200,7 @@ class Star(DetectableObject):
         self.x = 0
         self.y = 0
         self.detection_probability = 0
-        self.pixels = 0
+        self._pixels = 0
         return 
     
 class Obstacle(DetectableObject):
@@ -194,7 +214,7 @@ class Obstacle(DetectableObject):
         """
 
         self.detection_probability = 0
-        self.pixels = 0
+        self._pixels = 0
         return 
 
 
@@ -259,7 +279,7 @@ class Environment:
                 'y': obj.y,
                 'type': obj.color_id,  # Type of object (GridCell, Obstacle)
                 'detection_probability': obj.detection_probability,
-                'pixels':  obj.pixels
+                'pixels':  obj._pixels
             })
 
     def log_robot_state(self):
@@ -362,7 +382,7 @@ class Environment:
                         color = plt.cm.Reds(obj.detection_probability)
                     edgecolor = "red"
                 else:  # Free space (blue)
-                    color = plt.cm.Blues(obj.pixels)
+                    color = plt.cm.Blues(obj._pixels)
                     
                     # print(f"color: {obj.detection_probability}")
                     edgecolor = "blue"
