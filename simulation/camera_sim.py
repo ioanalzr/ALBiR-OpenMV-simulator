@@ -70,8 +70,8 @@ class Cam(object):
 
         for blob in blobs:
             # Update the big blob if the current blob has more pixels
-            if blob.pixels > max_pixels:
-                max_pixels = blob.pixels
+            if blob.pixels() > max_pixels:
+                max_pixels = blob.pixels()
                 big_blob = blob
 
         return big_blob

@@ -26,15 +26,19 @@ class Robot(object):
         ##
         self.servo = Servo(self)
         # self.servo.soft_reset()
-        self.cam = Cam(self,env) # maybe gain can be used to bound errors
+        self.cam = Cam(self,env) # 
         self.PID = PID(self,p, i, d, imax)
         ##
-        # Blob IDs
+        # Blob IDs - can add more or change ids depending on the order of thresholds in the thresholds list
         self.blue_id = 0
         self.green_id = 1
         self.red_id = 2
         self.star_id = 3
 
+        ###
+        self.state = State(self.cam.env.starting_pos[0] * self.cam.env.square_size + self.cam.env.square_size / 2, self.cam.env.starting_pos[1] * self.cam.env.square_size + self.cam.env.square_size / 2,self.cam.env.starting_pos[2],self.cam.env.starting_pos[3])
+
+    # added from real robot.py
         self.star_is_right = 1 # 1 means it's on the left (positive bias means turning left)
 
         self.scan_direction = 1
@@ -42,119 +46,6 @@ class Robot(object):
 
         self.alpha = self.cam.camera_elevation_angle
 
-        ###
-        self.state = State(self.cam.env.starting_pos[0] * self.cam.env.square_size + self.cam.env.square_size / 2, self.cam.env.starting_pos[1] * self.cam.env.square_size + self.cam.env.square_size / 2,self.cam.env.starting_pos[2],self.cam.env.starting_pos[3])
-        # current_state = State(self.state.x,self.state.y,self.state.theta,self.state.phi)
-        # self.states = []
-        # self.states.append(current_state)
-        # self.sim_time = 0
-        # self.max_sim_time = 5
-        # self.delta_t = 0.02
-        ###
-    # def run_simulation(self,speed = 0.2, bias = 0, max_sim_time = 5, time_step = 0.02, task = "RoboNav", trace = True, orientation = True,real_time = False):
-        
-    #     self.max_sim_time = max_sim_time
-    #     self.delta_t = time_step
-    #     self.sim_time = 0
-    #     if task == "RoboNav":
-    #         self.RoboNav(speed,bias)
-        
-    #     if orientation:
-    #         time_values_seconds = np.arange(len(self.states)) * self.delta_t  # Time in seconds
-
-    #         # Convert radians to degrees
-    #         theta_deg_values = [np.degrees(state.get_orientation()) for state in self.states]
-
-    #         for i in range (len(theta_deg_values)):
-    #             theta_deg_values[i] = theta_deg_values[i] % 360  # Ensure the angle is within [0, 360)
-    #             if theta_deg_values[i]  > 180:
-    #                 theta_deg_values[i]  -= 360 
-    #         gaze_deg_values = [state.get_gaze() + theta for state, theta in zip(self.states, theta_deg_values)]
-
-    #         # Plot theta (heading) and theta + phi (gaze) over time in degrees with time in seconds
-    #         plt.figure()
-    #         plt.plot(time_values_seconds, theta_deg_values, label='Heading (Theta) in degrees')
-    #         plt.plot(time_values_seconds, gaze_deg_values, label='Gaze Direction (Theta + Phi) in degrees')
-    #         plt.xlabel('Time (seconds)')
-    #         plt.ylabel('Degrees')
-    #         plt.title('Heading and Gaze Direction Over Time (in seconds)')
-    #         plt.legend()
-    #         plt.grid(True)
-    #         plt.show()
-            
-    #         fig, ax = plt.subplots()
-    #         ax.set_xlim(0, self.cam.env.grid_size[1] * self.cam.env.square_size)
-    #         ax.set_ylim(0, self.cam.env.grid_size[0] * self.cam.env.square_size)
-    #         ax.set_aspect('equal')
-    #         ax.set_title('Robot Trajectory on the Grid')
-    #         ax.set_xlabel('X Position (cm)')
-    #         ax.set_ylabel('Y Position (cm)')
-
-    #     # Draw grid cells
-    #     if trace:
-    #         for i in range(self.cam.env.grid_size[0]):
-    #             for j in range(self.cam.env.grid_size[1]):
-    #                 cell = self.cam.env.grid[i, j]
-    #                 if cell.color_id == 2:  # Target
-    #                     color = 'green'
-    #                 else:
-    #                     color = plt.cm.Blues(cell.detection_probability)  # Use a shades of blue colormap
-
-    #                 # Draw the cell background
-    #                 rect = plt.Rectangle(
-    #                     (j * self.cam.env.square_size, i * self.cam.env.square_size),
-    #                     self.cam.env.square_size, self.cam.env.square_size,
-    #                     linewidth=1, edgecolor='black', facecolor='white'
-    #                 )
-    #                 ax.add_patch(rect)
-
-    #                 # Draw obstacles
-    #                 if cell.color_id == 1:  # Obstacle
-    #                     obstacle_size = self.cam.env.square_size / 4
-    #                     obstacle_rect = plt.Rectangle(
-    #                         (j * self.cam.env.square_size + (self.cam.env.square_size - obstacle_size) / 2,
-    #                         i * self.cam.env.square_size + (self.cam.env.square_size - obstacle_size) / 2),
-    #                         obstacle_size, obstacle_size,
-    #                         linewidth=0, edgecolor='black', facecolor='red'
-    #                     )
-    #                     ax.add_patch(obstacle_rect)
-
-    #                 # Draw small squares for free space and target
-    #                 elif cell.color_id in (0, 2):  # Free space and target
-    #                     small_square_size = self.cam.env.square_size / 3
-    #                     small_rect = plt.Rectangle(
-    #                         (j * self.cam.env.square_size + (self.cam.env.square_size - small_square_size) / 2,
-    #                         i * self.cam.env.square_size + (self.cam.env.square_size - small_square_size) / 2),
-    #                         small_square_size, small_square_size,
-    #                         linewidth=0, edgecolor=color, facecolor=color
-    #                     )
-    #                     ax.add_patch(small_rect)
-
-    #         # Plot the robot's trajectory
-    #         trajectory_x = [state.x for state in self.states]
-    #         trajectory_y = [state.y for state in self.states]
-
-    #         # Plot the trajectory as a line with dots for each state
-    #         ax.plot(trajectory_x, trajectory_y, 'bo-', label='Trajectory', markersize=5, linewidth=2)
-
-    #         # Mark the robot's final position
-    #         final_state = self.states[-1]
-    #         ax.plot(final_state.x, final_state.y, 'go', markersize=8, label='Final Position')
-
-    #         # Highlight the target cell
-    #         if hasattr(self, 'target_position'):
-    #             target_x, target_y = self.target_position
-    #             target_rect = plt.Rectangle(
-    #                 (target_y * self.square_size, target_x * self.square_size),
-    #                 self.square_size, self.square_size,
-    #                 linewidth=2, edgecolor='cyan', facecolor='none'
-    #             )
-    #             ax.add_patch(target_rect)
-
-    #         plt.legend()
-    #         plt.gca().invert_yaxis()  # Invert Y-axis to match matrix indexing
-    #         plt.grid(True)
-    #         plt.show()
 
     def RoboNav(self, speed: float, bias: float):
         """
@@ -177,7 +68,7 @@ class Robot(object):
                     target_reached = True
                     #extra drive to get into the square with the body
                     self.drive(0.2, 0)
-                    self.servo.sleep_ms_simulated(200)  #800 if 0.1 speed with wire
+                    self.servo.sleep_ms_simulated(700)  #800 if 0.1 speed with wire
                     self.drive(0, 0)
 
                 elif green_found is True: #check if it needs to go to green
@@ -262,15 +153,12 @@ class Robot(object):
             if found_biggest is not None:
                 print("Drive to assigned blob")
                 counter=0
-                print(f" found_biggest.cx {found_biggest.cx}, id {found_biggest.color_id}")
+                print(f" found_biggest.cx {found_biggest.cx()}, id {found_biggest.color_id}")
                 print(f" self.cam.w_centre {self.cam.w_centre}")
-                steering = round((self.cam.w_centre-found_biggest.cx)/(2*self.cam.w_centre),3) 
+                steering = round((self.cam.w_centre-found_biggest.cx())/(2*self.cam.w_centre),3) 
                 print(f"steering: {steering}")
                 self.drive(speed, steering)
-                if found_biggest.color_id ==1:
-                    self.servo.sleep_ms_simulated(250) 
-                else:
-                    self.servo.sleep_ms_simulated(50)  
+                self.servo.sleep_ms_simulated(50)  
                 
                
             else:
@@ -381,7 +269,7 @@ class Robot(object):
             blob: The blob object to be tracked
         """
         # Error between camera angle and target in pixels
-        pixel_error = blob.cx - self.cam.w_centre
+        pixel_error = blob.cx() - self.cam.w_centre
 
         # Convert error to angle
         angle_error = -(pixel_error/self.cam.w_centre*2*self.cam.h_fov)
@@ -445,9 +333,15 @@ class Robot(object):
             if biggest_blue_blob_in_frame is not None: #blue
 #                print("found blue")
                 # check if current blue is the best blue
-                if biggest_blue_blob_in_frame.pixels > pixels:
-                    pixels = copy.deepcopy(biggest_blue_blob_in_frame.pixels) ##### change this, make .pixles(), .cx(), .cy() functions
+                new_pixels =  biggest_blue_blob_in_frame.pixels()
+                if new_pixels > pixels:
+                    pixels = new_pixels
                     pan_angle_to_best_blob = new_pan_angle
+                # best_blue_blob_for_scan, pan_angle_to_best_blob = self.is_new_blob_better_than_old(
+                #         biggest_blue_blob_in_frame,
+                #         best_blue_blob_for_scan,
+                #         new_pan_angle,
+                #         pan_angle_to_best_blob)
             star_blobs, img = self.cam.get_blobs_bottom(self.star_id)
             biggest_star = self.cam.get_biggest_blob(star_blobs)
             if biggest_star is not None:
@@ -469,7 +363,7 @@ class Robot(object):
         if old_blob is None:
             return new_blob, new_angle
         else: # TODO: Add in north star proximity
-            if(new_blob.pixels > old_blob.pixels):
+            if(new_blob.pixels() > old_blob.pixels()):
                 print(f"better angle, {new_angle}")
                 return new_blob, new_angle
             else:
@@ -498,7 +392,7 @@ class Robot(object):
             counter +=1
         print("star found")
         if biggest_star is not None:
-            if (self.cam.w_centre-biggest_star.cx>0):
+            if (self.cam.w_centre-biggest_star.cx()>0):
                 self.star_is_right = 1
             else:
                 self.star_is_right = -1
