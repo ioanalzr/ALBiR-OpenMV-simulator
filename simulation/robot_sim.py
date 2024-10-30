@@ -1,10 +1,6 @@
 from servos_sim import *
 from camera_sim import *
 from pid_control_sim import PID
-import math
-import numpy as np
-import matplotlib.pyplot as plt
-import copy
 import logging
 
 logger = logging.getLogger(__name__)
