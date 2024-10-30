@@ -2,6 +2,10 @@ import time
 import random 
 import math
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
 class State:
     def __init__(self, x: float, y: float, theta: float, phi = float):
         """
@@ -33,7 +37,7 @@ class State:
         self.y += delta_y
         self.theta = self.theta + delta_theta
         self.phi+= delta_phi # self.servo.pan_pos
-        print(f"x {self.x},y {self.y}, theta {self.theta},phi {self.phi}")
+        logger.debug(f"State updated - x: {self.x}, y: {self.y}, theta: {self.theta}, phi: {self.phi}")
         
 
     def get_position(self):
@@ -148,7 +152,7 @@ class Servo:
         elapsed_time = 0
 
         while elapsed_time < total_time:
-            print(f"elapsed time: {elapsed_time}")
+            logger.debug(f"Simulation time elapsed: {elapsed_time}")
             self.set_speed(self.curr_l_speed, self.curr_r_speed,self.robot.cam.env.delta_t)
             elapsed_time += self.robot.cam.env.delta_t
             self.robot.cam.env.sim_time += self.robot.cam.env.delta_t
