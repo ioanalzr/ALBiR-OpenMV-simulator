@@ -1,3 +1,4 @@
+import logging
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -7,6 +8,15 @@ from matplotlib.animation import FuncAnimation
 import csv
 import time
 from robot_sim import *
+import pandas as pd
+from visualization import EnvironmentVisualizer
+
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO  # Default level, can be changed
+)
+logger = logging.getLogger(__name__)
 
 # Base class for detectable objects
 class DetectableObject:
@@ -29,13 +39,10 @@ class DetectableObject:
     def pixels(self):
         return self._pixels
 
-
 # Class for the grid cells
 class GridCell(DetectableObject):
     def __init__(self, x, y, color_id):
         super().__init__(x, y, color_id)
-
-    
     
     def update_detection_probability(self, robot_state, max_range, obstacles,cam,bottom_fraction=1):
         """
@@ -62,7 +69,6 @@ class GridCell(DetectableObject):
         dx = self.x - robot_state.x # to centre of the cell
         dy = self.y - robot_state.y # to centre of the cell
         flat_distance = math.sqrt(abs(dx) ** 2 + abs(dy) ** 2)
-   
         
         # Rotation matrix to rotate the grid cell coordinates by -gaze_dir around the robot's position
         cos_gaze = math.cos(math.radians(-gaze_dir))
@@ -74,8 +80,6 @@ class GridCell(DetectableObject):
 
         # Now compute the angle based on the rotated coordinates
         relative_angle_horizontal = math.degrees(math.atan2(rotated_y, rotated_x))
-        # print(relative_angle_horizontal)
-      
 
         angle_to_cell_vertical = math.degrees(math.atan2(camera_h, flat_distance))  # Vertical angle
         angle_to_cell_vertical = angle_to_cell_vertical*-1 - cam_elevation_angle
@@ -86,13 +90,10 @@ class GridCell(DetectableObject):
         if angle_to_farthest_point_vertical< cam_elevation_angle-v_fov/2 or angle_to_closest_point_vertical> cam_elevation_angle+v_fov/2:
             self.detection_probability = 0.0
             self._pixels = 0
-            # print(f"Detection 0 for cell ({self.x}, {self.y}): Cell is outside vertical FOV. cam_elevation_angle-v_fov/2: {cam_elevation_angle-v_fov/2},cam_elevation_angle+v_fov/2: {cam_elevation_angle+v_fov/2}, angle_to_closest_point_vertical: {angle_to_closest_point_vertical}, angle_to_farthest_point_vertical: {angle_to_farthest_point_vertical}")
             return
         elif abs(angle_to_closest_point_vertical)>abs(cam_elevation_angle-v_fov/2):
             self._pixels = self._pixels * (1-(abs(angle_to_closest_point_vertical)-abs(cam_elevation_angle-v_fov/2))/(abs(angle_to_closest_point_vertical)-abs(angle_to_farthest_point_vertical)))
         
-        # Determine the coordinates of the four corners of the grid cell
-
         corners = [
             (self.x - half_square_width, self.y - half_square_width),  # bottom-left
             (self.x + half_square_width, self.y - half_square_width),  # bottom-right
@@ -157,7 +158,6 @@ class GridCell(DetectableObject):
                 if obs_right_angle > 180:
                     obs_right_angle -= 360  # Adjust to be between -180 and 180
                 leftmost_obs_angle, rightmost_obs_angle = min(obs_left_angle, obs_right_angle), max(obs_left_angle, obs_right_angle)
-                # print(f"({self.x}, {self.y}): rightmost_angle {rightmost_angle}, rightmost_obs_angle {rightmost_obs_angle},leftmost_angle {leftmost_angle}, leftmost_obs_angle {leftmost_obs_angle}")
                 if leftmost_obs_angle <= leftmost_angle and rightmost_obs_angle>= rightmost_angle:
                     self._pixels = 0
                     self.detection_probability = 0
@@ -181,12 +181,7 @@ class GridCell(DetectableObject):
         elif self._cx<-sensor_width:
             self._cx = -   sensor_width
         self._cy = (sensor_height / 2) * (1 + math.radians(angle_to_cell_vertical) / math.radians(v_fov / 2))
-        # print(f"({self.x}, {self.y}): self.detection_probability {self.detection_probability}, flat_distance {flat_distance}, pixels {self._pixels}, left overlap {max_left_overlap}, right overlap {max_right_overlap}")
-        # print(f"({self.x}, {self.y}), relative_angle_horizontal: {relative_angle_horizontal}, beta: {beta}, cx: {self._cx}")
         
-
-   
-
 # Class for obstacles
 class Star(DetectableObject):
     def __init__(self, position):
@@ -217,10 +212,12 @@ class Obstacle(DetectableObject):
         self._pixels = 0
         return 
 
-
 # The environment and simulation class
 class Environment:
-    def __init__(self, task="RoboNav", starting_pos=(0, 0, 0, 0), target_pos=(1, 5), obstacles=[],star_position = 1):
+    def __init__(self, task="RoboNav", starting_pos=(0, 0, 0, 0), target_pos=(1, 5), obstacles=[],star_position = 1, log_level=logging.INFO):
+        # Set logging level
+        logger.setLevel(log_level)
+        
         # Set grid
         if task == "RoboNav":
             self.grid_size = [4, 6]
@@ -230,7 +227,6 @@ class Environment:
         self.obstacles = []
         self.robot = Robot(self)
         self.star = Star(position = star_position)
-
 
         # Initialize grid cells
         self.grid = np.empty(self.grid_size, dtype=object)
@@ -245,11 +241,6 @@ class Environment:
                     color_id = self.set_cell_id(i, j)
                     self.grid[i, j] = GridCell(x, y, color_id)
 
-        # Initialize obstacles
-        # self.obstacles = [Obstacle(i * self.square_size + self.square_size / 2,
-        #                            j * self.square_size + self.square_size / 2, height=5)
-        #                   for i, j in obstacles]
-
         # List of all detectable objects
         self.detectable_objects = []
         self.detectable_objects.extend(self.grid.flatten())
@@ -257,7 +248,7 @@ class Environment:
         self.detectable_objects.append(self.star)
         self.show_frames = True
 
-      
+        self.visualizer = EnvironmentVisualizer(self)
 
     def set_cell_id(self, i, j):
         """
@@ -274,12 +265,12 @@ class Environment:
         """
         for obj in self.detectable_objects:
             self.snapshot_data.append({
-                'time': self.sim_time,
-                'x': obj.x,
-                'y': obj.y,
+                'time': round(self.sim_time,3),
+                'x': round(obj.x, 3),
+                'y': round(obj.y, 3),
                 'type': obj.color_id,  # Type of object (GridCell, Obstacle)
-                'detection_probability': obj.detection_probability,
-                'pixels':  obj._pixels
+                'detection_probability': round(obj.detection_probability, 3),
+                'pixels':  round(obj._pixels, 3)
             })
 
     def log_robot_state(self):
@@ -287,11 +278,11 @@ class Environment:
         Log the robot's state (x, y, theta, phi).
         """
         self.robot_states.append({
-            'time': self.sim_time,
-            'x': self.robot.state.x,
-            'y': self.robot.state.y,
-            'heading': self.robot.state.theta,
-            'gaze': self.robot.state.phi
+            'time': round(self.sim_time, 3),
+            'x': round(self.robot.state.x, 3),
+            'y': round(self.robot.state.y, 3),
+            'heading': round(self.robot.state.theta, 3),
+            'gaze': round(self.robot.state.phi, 3)
         })
 
     def run_simulation(self, speed=0.2, bias=0, max_sim_time=5, time_step=0.02, task="RoboNav",show_frames = False):
@@ -322,11 +313,16 @@ class Environment:
 
         # Update detection for all objects
         for obj in self.detectable_objects:
-            obj.update_detection_probability(robot_state, max_range, self.obstacles,self.robot.cam, bottom_fraction)
+            obj.update_detection_probability(robot_state, max_range, self.obstacles, self.robot.cam, bottom_fraction)
 
         # Log detection probabilities
         if hasattr(self, "max_sim_time"):
             self.log_detection_probabilities()
+            
+        # Modify this part to use the visualizer
+        if self.show_frames:
+            self.visualizer.draw_view(robot_state)
+            
         return self.detectable_objects, self
 
     def save_to_csv(self):
@@ -348,78 +344,3 @@ class Environment:
             writer.writeheader()
             for snapshot in self.snapshot_data:
                 writer.writerow(snapshot)
-
-    def draw_view(self, robot_state):
-        """
-        Draw the current state of the environment including the robot's view and detection probabilities.
-        """
-        gaze_dir = robot_state.theta + robot_state.phi
-        # Set up the plot
-        fig, ax = plt.subplots()
-        ax.set_xlim(0, self.grid_size[0] * self.square_size)
-        ax.set_ylim(0, self.grid_size[1] * self.square_size)
-        ax.set_aspect('equal')
-        ax.set_title('Robot Field of View')
-        ax.set_xlabel('X Position (cm)')
-        ax.set_ylabel('Y Position (cm)')
-
-        # Iterate through the grid to draw grid cells and obstacles
-        for i in range(self.grid_size[0]):
-            for j in range(self.grid_size[1]):
-                obj = self.grid[i][j]
-
-                if obj.color_id == 1:  # Target (green)
-                    if obj.detection_probability == 1:
-                        color = 'green'
-                    else:
-                        color = plt.cm.Greens(obj.detection_probability)
-                    edgecolor = 'green'
-                elif obj.color_id == 2:  # Obstacle (red with shades based on detection probability)
-                    if obj.detection_probability == 1:
-                        color = 'red'
-                    else:
-                    # color = plt.cm.Reds(obj.detection_probability)
-                        color = plt.cm.Reds(obj.detection_probability)
-                    edgecolor = "red"
-                else:  # Free space (blue)
-                    color = plt.cm.Blues(obj._pixels)
-                    
-                    # print(f"color: {obj.detection_probability}")
-                    edgecolor = "blue"
-
-                # Draw a smaller square in the center of the grid for each object
-                small_square_size = self.square_size / 3
-                small_rect = patches.Rectangle(
-                    (obj.x - small_square_size / 2, obj.y - small_square_size / 2),
-                    small_square_size, small_square_size, linewidth=1, edgecolor=edgecolor, facecolor=color
-                )
-                ax.add_patch(small_rect)
-
-        # Draw the robot as a rotated rectangle
-        robot_length = 10  # Long side (in cm)
-        robot_width = 8    # Short side (in cm)
-
-        # Create the robot rectangle at the current robot position
-        robot_rect = patches.Rectangle(
-            (robot_state.x - robot_width / 2, robot_state.y - robot_length / 2),
-            robot_width, robot_length,
-            linewidth=1, edgecolor='black', facecolor='black'
-        )
-
-        # Apply a rotation transformation based on the robot's gaze direction
-        t = mtransforms.Affine2D().rotate_deg_around(robot_state.x, robot_state.y, gaze_dir) + ax.transData
-        robot_rect.set_transform(t)
-
-        # Add the robot rectangle to the plot
-        ax.add_patch(robot_rect)
-
-        # Draw grid lines
-        for x in range(0, (self.grid_size[0] + 1) * self.square_size, self.square_size):
-            ax.axvline(x, color='black', linestyle='-', linewidth=1)
-        for y in range(0, (self.grid_size[1] + 1) * self.square_size, self.square_size):
-            ax.axhline(y, color='black', linestyle='-', linewidth=1)
-
-        plt.gca().invert_yaxis()  # Invert Y-axis to match matrix indexing
-        plt.colorbar(plt.cm.ScalarMappable(cmap='Blues'), ax=ax, orientation='vertical', label='Pixels # ')
-        plt.show()
-

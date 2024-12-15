@@ -46,7 +46,8 @@ class Cam(object):
         """
         blobs, img = self.env.take_snapshot(self.robot.state,max_range = 40, bottom_fraction = 1)
         if self.env.show_frames:
-            img.draw_view(self.robot.state)
+            # Use the visualizer instead of calling draw_view directly
+            self.env.visualizer.draw_view(self.robot.state)
 
         if index is not None:
             blobs = [blob for blob in blobs if blob.detection_probability >0 and blob.color_id == index]

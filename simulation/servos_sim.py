@@ -1,7 +1,9 @@
-import time 
 import random 
 import math
-import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
 class State:
     def __init__(self, x: float, y: float, theta: float, phi = float):
         """
@@ -33,7 +35,7 @@ class State:
         self.y += delta_y
         self.theta = self.theta + delta_theta
         self.phi+= delta_phi # self.servo.pan_pos
-        print(f"x {self.x},y {self.y}, theta {self.theta},phi {self.phi}")
+        logger.debug(f"State updated - x: {self.x}, y: {self.y}, theta: {self.theta}, phi: {self.phi}")
         
 
     def get_position(self):
@@ -105,7 +107,7 @@ class Servo:
         self.curr_r_speed = 0
         self.pan_pos = 0
 
-        self.noise_std = 0.02
+        self.noise_std = 0.05
         self.pan_error_std = 0.1 # deg
         self.pan_delay = 0.01 #s
         
@@ -148,7 +150,7 @@ class Servo:
         elapsed_time = 0
 
         while elapsed_time < total_time:
-            print(f"elapsed time: {elapsed_time}")
+            logger.debug(f"Simulation time elapsed: {elapsed_time}")
             self.set_speed(self.curr_l_speed, self.curr_r_speed,self.robot.cam.env.delta_t)
             elapsed_time += self.robot.cam.env.delta_t
             self.robot.cam.env.sim_time += self.robot.cam.env.delta_t
@@ -217,34 +219,27 @@ class Servo:
 
     def set_speed(self, l_speed: float, r_speed: float, delta_t: float) -> None:
         WHEEL_BASE = 0.085    # Distance between the wheels in meters
-        max_speed = 10.0      # Max wheel speed (normalized, can be scaled to real robot speeds)
+        max_speed = 10.0      # Max wheel speed (normalized)
         min_speed = -10.0     # Min wheel speed (negative for reverse)
 
-    
-        # Apply more noise at slower speeds, reduce noise at higher speeds
-        
-
         # Calculate noise bounds based on speed
-        noise_bound_l = self.calculate_noise(self.noise_std,l_speed)
-        noise_bound_r = self.calculate_noise(self.noise_std,r_speed)
+        noise_bound_l = self.calculate_noise(self.noise_std, l_speed)
+        noise_bound_r = self.calculate_noise(self.noise_std, r_speed)
 
         # Apply Gaussian noise to the wheel speeds
         l_speed_noisy = random.gauss(l_speed, noise_bound_l)
         r_speed_noisy = random.gauss(r_speed, noise_bound_r)
 
-        # Ensure the noisy speeds are within bounds (clamp them to min_speed and max_speed)
+        # Ensure the noisy speeds are within bounds
         l_speed_noisy = max(min(l_speed_noisy, max_speed), min_speed)
         r_speed_noisy = max(min(r_speed_noisy, max_speed), min_speed)
 
+        # Use the noisy speeds for movement calculation
+        v_left = l_speed_noisy 
+        v_right = r_speed_noisy
 
-        # v_left = l_speed_noisy 
-        # v_right = r_speed_noisy 
-    
-        v_left = l_speed 
-        v_right = r_speed 
-
-        v = (v_left + v_right) / 2  # Linear velocity (average of left and right)
-        omega = (v_right - v_left) / WHEEL_BASE  # Angular velocity (radians/second)
+        v = (v_left + v_right) / 2  # Linear velocity
+        omega = (v_right - v_left) / WHEEL_BASE  # Angular velocity
 
         # Update position and orientation
         delta_theta = math.degrees(omega * delta_t)

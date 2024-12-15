@@ -1,11 +1,9 @@
 from servos_sim import *
 from camera_sim import *
 from pid_control_sim import PID
-import math
-import numpy as np
-import matplotlib.pyplot as plt
-import copy
+import logging
 
+logger = logging.getLogger(__name__)
 
 class Robot(object):
     """
@@ -51,47 +49,41 @@ class Robot(object):
         """
         controls the main logic
         """
-        # Initiates
-    
-        target_has_been_found = False # variable for the green found
-        target_reached = False # variable for when green was found, but now is lost, so target is reached
+        logger.info("Starting RoboNav navigation")
+        target_has_been_found = False
+        target_reached = False
 
         while target_reached is False:
             blue_found = self.is_blob_in_frame(self.blue_id)
             green_found = self.is_blob_in_frame(self.green_id)
 
-            # Check if time to completely stop
-            if target_has_been_found is True: #check if the robot has finished
-                print("Target has been found")
-                if green_found is False: #if no green, green is already passed, so finish
-                    print("the target has been found but now is lost, break while loop")
+            if target_has_been_found:
+                logger.debug("Target has been found")
+                if not green_found:
+                    logger.info("Target passed, finishing navigation")
                     target_reached = True
-                    #extra drive to get into the square with the body
                     self.drive(0.2, 0)
-                    self.servo.sleep_ms_simulated(700)  #800 if 0.1 speed with wire
+                    self.servo.sleep_ms_simulated(700)
                     self.drive(0, 0)
-
-                elif green_found is True: #check if it needs to go to green
-                    print('Target found')
+                elif green_found:
+                    logger.debug("Moving to target")
                     target_has_been_found = True
                     target_reached = self.go_to_blob(speed, bias, self.green_id)
-
-            elif green_found is True: #check if it needs to go to green
-                print('Target found')
+            
+            elif green_found:
+                logger.info("Target detected")
                 target_has_been_found = True
                 target_reached = self.go_to_blob(speed, bias, self.green_id)
-
-
-            elif blue_found is True: #check if it needs to go to blue
-                print('Blue found')
+            
+            elif blue_found:
+                logger.debug("Following blue path")
                 target_has_been_found = self.go_to_blob(speed, bias, self.blue_id)
-
-            else: #if nothing has been found, look for blobs
-                print('Nothing found, looking')
+            
+            else:
+                logger.debug("Searching for path")
                 self.searching_manager()
-                # Scan: pan the camera to find blobs
-                # If scan success
-        return 
+
+        logger.info("Navigation completed")
 
 
     def is_blob_in_frame(self, index: int) -> bool:
@@ -99,7 +91,7 @@ class Robot(object):
         Checks if there is a blob if a colour in frame
         RETURN: bool
         """
-        print ("is blob in frame")
+        logger.debug("Checking if blob is in frame")
         blobs, img = self.cam.get_blobs_bottom(index)
         found_blue = self.cam.get_biggest_blob(blobs)
 
@@ -112,7 +104,7 @@ class Robot(object):
         """
         buffer for the camera gain to start working
         """
-        print("waiting for camera")
+        logger.debug("Waiting for camera initialization")
         blobs, img = self.cam.get_blobs_bottom(1)
         self.servo.sleep_ms_simulated(1000)
 
@@ -127,7 +119,7 @@ class Robot(object):
         while counter < 1: #frame buffer 2 for actual robot
 
             if blob_id is not self.green_id:
-                print ("looking for green")
+                logger.debug("Looking for green blob")
                 #look for green in every loop, in case green appears while going to blue
                 green_blobs, img = self.cam.get_blobs_bottom(self.green_id)
                 found_biggest_green = self.cam.get_biggest_blob(green_blobs)
@@ -137,13 +129,13 @@ class Robot(object):
                 #     found_biggest_green = self.is_valid(found_biggest_green)
 
                 if found_biggest_green is not None:
-                    print("found green")
+                    logger.info("Green blob detected")
                     self.drive(0, 0)
-                    print ("Break and switch ids")
+                    logger.debug("Switching target blob IDs")
                     return True
 
             # if no green found, look for the next blob (depending on blob_id)
-            print ("go to blob  " + str(counter))
+            logger.debug(f"Going to blob, attempt {counter}")
             blobs, img = self.cam.get_blobs_bottom(blob_id)
             found_biggest = self.cam.get_biggest_blob(blobs)
 
@@ -151,18 +143,18 @@ class Robot(object):
             #     found_biggest = self.is_valid(found_biggest)
 
             if found_biggest is not None:
-                print("Drive to assigned blob")
+                logger.debug("Driving to assigned blob")
                 counter=0
-                print(f" found_biggest.cx {found_biggest.cx()}, id {found_biggest.color_id}")
-                print(f" self.cam.w_centre {self.cam.w_centre}")
+                logger.debug(f"Blob detected at x={found_biggest.cx()}, id={found_biggest.color_id}")
+                logger.debug(f"Camera center at x={self.cam.w_centre}")
                 steering = round((self.cam.w_centre-found_biggest.cx())/(2*self.cam.w_centre),3) 
-                print(f"steering: {steering}")
+                logger.debug(f"Steering adjustment: {steering}")
                 self.drive(speed, steering)
                 self.servo.sleep_ms_simulated(50)  
                 
                
             else:
-                print ("lost assigned blob" + str(counter))
+                logger.debug(f"Lost assigned blob, attempt {counter}")
                 counter+=1
 
         self.drive(0,0)
@@ -181,22 +173,24 @@ class Robot(object):
                 - make sure not behind red
         3: if not valid again, dead_end_manager
         """
-        print ("Looking for blob")
+        logger.debug("Starting blob search")
         self.drive(0, 0)
         pan_angle_to_best_blob, is_best_blob_green = self.scan_for_blob(step=2, limit=40)
 
         if (is_best_blob_green is True):
-            print("Heading to green")
+            logger.info("Target acquired, heading to green")
             self.servo.set_angle(pan_angle_to_best_blob)
             self.servo.sleep_ms_simulated(200)
 
             self.turn_to_blob(self.green_id, pan_angle_to_best_blob, self.find_dir_from_angle(pan_angle_to_best_blob))
         elif (pan_angle_to_best_blob is None):
-            print('reach deadend')
+            logger.info("Dead end reached")
+            logger.debug("Initiating dead end recovery")
+            print("reach deadend")
             print("dead end")
             self.dead_end_exit()
         else:
-            print("Heading to blue")
+            logger.info("Path found, heading to blue")
             self.servo.set_angle(pan_angle_to_best_blob)
             self.servo.sleep_ms_simulated(200) 
             
@@ -207,7 +201,8 @@ class Robot(object):
         """
         find which way to turn, depending on the pan angle, in order to get the blob to the middle of the robot
         """
-        print ("finding direction")
+        logger.debug("Calculating turn direction")
+        logger.info("finding direction")
         return 1 if angle < 0 else -1
 
     def turn_to_blob(self, blob_id : int, angle: float, direction: float) -> None:
@@ -218,7 +213,8 @@ class Robot(object):
         Args: angle: the angle to turn
             direction: which way to turn
         """
-        print ("turn to blob called")
+        logger.debug("Initiating turn to blob")
+        logger.info("turn to blob called")
 #        print(f"Blob ID is {blob_id}, angle is {angle}, direction is {direction}")
         # if abs(angle)>34:
         #     print ("USING THE BOOST")
@@ -237,10 +233,11 @@ class Robot(object):
         # Try to line up the body with the camera
 
         if blob_found is not None:
-            print("BLUE valid")
+            logger.debug("Valid blue blob detected")
             self.drive(0.05, direction)
             while ((abs(angle) > 5) and (abs(angle) < 45)):
-                print("turn to blob loop entered")
+                logger.debug("Turning to align with blob")
+                logger.info("turn to blob loop entered")
                 blobs, img = self.cam.get_blobs_bottom(blob_id)
                 blob_found = self.cam.get_biggest_blob(blobs)
     
@@ -281,7 +278,7 @@ class Robot(object):
 
         # Move pan servo to track block
         self.servo.set_angle(pan_angle)
-        print(f"pixel_error: {pixel_error}, angle_error:m{angle_error}, pid_error: {pid_error}, pan_angle:{pan_angle} ")
+        logger.debug(f"Tracking metrics - pixel_error: {pixel_error}, angle_error: {angle_error}, pid_error: {pid_error}, pan_angle: {pan_angle}")
 
         return pan_angle
 
@@ -345,7 +342,7 @@ class Robot(object):
             star_blobs, img = self.cam.get_blobs_bottom(self.star_id)
             biggest_star = self.cam.get_biggest_blob(star_blobs)
             if biggest_star is not None:
-                print("star found in scanning")
+                logger.debug("Star found in scanning")
                 if new_pan_angle>=0:
                     self.star_on_right = -1
                 else:
@@ -354,7 +351,7 @@ class Robot(object):
             # Check if limits are reached and reverse direction
             if self.servo.pan_pos >= limit or self.servo.pan_pos <= -limit:
                 counter += 1
-                print("Not found ...")
+                logger.debug("Not found ...")
                 self.scan_direction *= -1
 #        print (pan_angle_to_best_blob)
         return pan_angle_to_best_blob, is_best_blob_green
@@ -364,7 +361,7 @@ class Robot(object):
             return new_blob, new_angle
         else: # TODO: Add in north star proximity
             if(new_blob.pixels() > old_blob.pixels()):
-                print(f"better angle, {new_angle}")
+                logger.debug(f"better angle, {new_angle}")
                 return new_blob, new_angle
             else:
                 return old_blob, old_angle
@@ -380,7 +377,7 @@ class Robot(object):
         star_blobs, img = self.cam.get_blobs_bottom(self.star_id)
         biggest_star = self.cam.get_biggest_blob(star_blobs)
         while biggest_star is None and counter <16:
-            print("turning to star")
+            logger.debug("Turning to locate star")
             self.servo.set_spin(0.1*self.star_is_right)
             self.servo.sleep_ms_simulated(100) 
 
@@ -390,14 +387,14 @@ class Robot(object):
             star_blobs, img = self.cam.get_blobs_bottom(self.star_id)
             biggest_star = self.cam.get_biggest_blob(star_blobs)
             counter +=1
-        print("star found")
+        logger.info("Star located")
         if biggest_star is not None:
             if (self.cam.w_centre-biggest_star.cx()>0):
                 self.star_is_right = 1
             else:
                 self.star_is_right = -1
             while True:
-                print("turning to escape")
+                logger.debug("Executing escape turn")
                 green_blobs, img = self.cam.get_blobs_bottom(self.green_id)
                 biggest_green = self.cam.get_biggest_blob(green_blobs)
 
@@ -405,7 +402,7 @@ class Robot(object):
     #                print (" green found")
                     # biggest_green = self.is_valid(biggest_green)
                     if (biggest_green is not None):
-                        print ("Valid green found")
+                        logger.info("Valid green path found during escape")
                         return
 
                 blue_blobs, img = self.cam.get_blobs_bottom(self.blue_id)
@@ -416,7 +413,7 @@ class Robot(object):
     # #                    print (" blue found")
     #                     biggest_blue = self.is_valid(biggest_blue)
                 if biggest_blue is not None:
-                    print ("Valid blue found")
+                    logger.info("Valid blue path found during escape")
                     return
 
                 self.servo.set_spin(0.1*self.star_is_right)
@@ -424,6 +421,7 @@ class Robot(object):
                 self.drive(0,0)
                 self.servo.sleep_ms_simulated(100)
 
+                logger.debug("No valid path found during escape turn")
                 print("no blob found")
 
 
