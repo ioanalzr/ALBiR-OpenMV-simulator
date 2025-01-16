@@ -1,4 +1,7 @@
 from environment import *
+import logging
+
+logger = logging.getLogger(__name__)
 class Cam(object):
     """
     The Cam class manages the camera sensor for image capturing, processing,
@@ -13,6 +16,7 @@ class Cam(object):
         """
         self.robot = robot
         self.env = env
+        self.frame_delay = 0
      
         # Initialise sensor properties
         self.w_centre = 160 # pixels
@@ -22,7 +26,12 @@ class Cam(object):
         self.camera_elevation_angle = -11 
         self.camera_h = 8
 
-    
+    def set_frame_delay(self, frame_buffer):
+        if frame_buffer:
+            self.frame_delay = 0.01
+        else:
+            self.frame_delay = 0.001
+
     def get_blobs(self) -> tuple:
         """
         Capture an image and detect color blobs based on predefined thresholds.
@@ -31,12 +40,13 @@ class Cam(object):
             blobs (list): List of detected blobs.22
             img (image): Captured image used to find blobs.
         """
-        blobs, img = self.env.take_snapshot(self.robot.state)
+        blobs, img = self.env.take_snapshot(self.robot.state, frame_delay = self.frame_delay)
+        blobs = [blob for blob in blobs if blob.detected == 1]
         return blobs, img
 
 
 
-    def get_blobs_bottom(self,index = None) -> tuple:
+    def get_blobs_bottom(self,index = None,max_range = 40) -> tuple:
         """
         Capture an image and detect color blobs based on predefined thresholds.
 
@@ -44,15 +54,25 @@ class Cam(object):
             blobs (list): List of detected blobs.
             img (image): Captured image used to find blobs.
         """
-        blobs, img = self.env.take_snapshot(self.robot.state,max_range = 40, bottom_fraction = 1)
-        if self.env.show_frames:
-            # Use the visualizer instead of calling draw_view directly
-            self.env.visualizer.draw_view(self.robot.state)
 
+        blobs, img = self.env.take_snapshot(self.robot.state, max_range=max_range, bottom_fraction=1, frame_delay = self.frame_delay)
+    
+    
+        # # Log before filtering
+        # logger.debug("Before filtering blobs:")
+        # for blob in blobs:
+        #     logger.debug(f"Blob - Detected: {blob.detected}, Color ID: {blob.color_id}, Pixels: {blob._pixels}")
+
+        # Filter blobs
         if index is not None:
-            blobs = [blob for blob in blobs if blob.detection_probability >0 and blob.color_id == index]
+            blobs = [blob for blob in blobs if blob.detected == 1 and blob.color_id == index]
         else:
-            blobs = [blob for blob in blobs if blob.detection_probability >0  and (blob.color_id == 0 or blob.color_id == 1 or blob.color_id == 2 or blob.color_id == 3)]
+            blobs = [blob for blob in blobs if blob.detected == 1 and blob.color_id in [0, 1, 2, 3]]
+
+        # # Log after filtering
+        # logger.debug("After filtering blobs:")
+        # for blob in blobs:
+        #     logger.debug(f"Blob - Detected: {blob.detected}, Color ID: {blob.color_id}, Pixels: {blob._pixels}")
 
         return blobs, img
 
