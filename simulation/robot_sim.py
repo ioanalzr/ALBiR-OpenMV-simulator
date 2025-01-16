@@ -22,10 +22,11 @@ class Robot(object):
             imax (float): Maximum Integral error for the PID.
         """
         ##
-        self.servo = Servo(self)
+        self.servo = Servo(self,env.servo_error,env.pan_error)
         # self.servo.soft_reset()
         self.cam = Cam(self,env) # 
         self.PID = PID(self,p, i, d, imax)
+        self.WHEEL_BASE = 0.085
         ##
         # Blob IDs - can add more or change ids depending on the order of thresholds in the thresholds list
         self.blue_id = 0
@@ -58,25 +59,25 @@ class Robot(object):
             green_found = self.is_blob_in_frame(self.green_id)
 
             if target_has_been_found:
-                logger.debug("Target has been found")
+                logger.debug(f"Target has been found ")
                 if not green_found:
-                    logger.info("Target passed, finishing navigation")
+                    logger.info(f"Target passed, finishing navigation ")
                     target_reached = True
                     self.drive(0.2, 0)
                     self.servo.sleep_ms_simulated(700)
                     self.drive(0, 0)
                 elif green_found:
-                    logger.debug("Moving to target")
+                    logger.debug(f"Moving to target ")
                     target_has_been_found = True
                     target_reached = self.go_to_blob(speed, bias, self.green_id)
             
             elif green_found:
-                logger.info("Target detected")
+                logger.info(f"Target detected ")
                 target_has_been_found = True
                 target_reached = self.go_to_blob(speed, bias, self.green_id)
             
             elif blue_found:
-                logger.debug("Following blue path")
+                logger.debug(f"Following blue path ")
                 target_has_been_found = self.go_to_blob(speed, bias, self.blue_id)
             
             else:
@@ -119,7 +120,7 @@ class Robot(object):
         while counter < 1: #frame buffer 2 for actual robot
 
             if blob_id is not self.green_id:
-                logger.debug("Looking for green blob")
+                logger.debug(f"Looking for green blob ")
                 #look for green in every loop, in case green appears while going to blue
                 green_blobs, img = self.cam.get_blobs_bottom(self.green_id)
                 found_biggest_green = self.cam.get_biggest_blob(green_blobs)
@@ -129,7 +130,7 @@ class Robot(object):
                 #     found_biggest_green = self.is_valid(found_biggest_green)
 
                 if found_biggest_green is not None:
-                    logger.info("Green blob detected")
+                    logger.info(f"Green blob detected ")
                     self.drive(0, 0)
                     logger.debug("Switching target blob IDs")
                     return True
@@ -176,9 +177,10 @@ class Robot(object):
         logger.debug("Starting blob search")
         self.drive(0, 0)
         pan_angle_to_best_blob, is_best_blob_green = self.scan_for_blob(step=2, limit=40)
+        logger.info(f"Pan angle to best blob: {pan_angle_to_best_blob} ")
 
         if (is_best_blob_green is True):
-            logger.info("Target acquired, heading to green")
+            logger.info(f"Target acquired, heading to green ")
             self.servo.set_angle(pan_angle_to_best_blob)
             self.servo.sleep_ms_simulated(200)
 
@@ -192,7 +194,7 @@ class Robot(object):
         else:
             logger.info("Path found, heading to blue")
             self.servo.set_angle(pan_angle_to_best_blob)
-            self.servo.sleep_ms_simulated(200) 
+            self.servo.sleep_ms_simulated(500) 
             
             self.turn_to_blob(self.blue_id, pan_angle_to_best_blob, self.find_dir_from_angle(pan_angle_to_best_blob))
 
@@ -222,7 +224,7 @@ class Robot(object):
         #     self.servo.sleep_ms_simulated(400) 
 
         #     self.drive(0, 0)
-#            time.sleep_ms(50)
+        #     # time.sleep_ms(50)
 
         blobs, img = self.cam.get_blobs_bottom(blob_id)
         blob_found = self.cam.get_biggest_blob(blobs)
@@ -233,7 +235,7 @@ class Robot(object):
         # Try to line up the body with the camera
 
         if blob_found is not None:
-            logger.debug("Valid blue blob detected")
+            logger.info("Valid blue blob detected")
             self.drive(0.05, direction)
             while ((abs(angle) > 5) and (abs(angle) < 45)):
                 logger.debug("Turning to align with blob")
@@ -252,6 +254,8 @@ class Robot(object):
                 else:
                     self.drive(0,0) # Stop spinning
                     break
+            else:
+                logger.info(f"No Valid blue blob detected from {self.state.get_gaze()}")
         self.drive(0,0) # Stop spinning
 
 
@@ -278,7 +282,8 @@ class Robot(object):
 
         # Move pan servo to track block
         self.servo.set_angle(pan_angle)
-        logger.debug(f"Tracking metrics - pixel_error: {pixel_error}, angle_error: {angle_error}, pid_error: {pid_error}, pan_angle: {pan_angle}")
+        logger.info(f"Tracking metrics - blob cx {blob.cx()}, pixel_error: {pixel_error}, angle_error: {angle_error}, pid_error: {pid_error}, pan_angle: {pan_angle}")
+        
 
         return pan_angle
 
