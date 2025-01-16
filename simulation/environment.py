@@ -1,15 +1,17 @@
+
 import logging
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+# import matplotlib.pyplot as plt
+# import matplotlib.patches as patches
 import numpy as np
 import math
-import matplotlib.transforms as mtransforms
-from matplotlib.animation import FuncAnimation
+# import matplotlib.transforms as mtransforms
+# from matplotlib.animation import FuncAnimation
 import csv
 import time
 from robot_sim import *
-import pandas as pd
+# import pandas as pd
 from visualization import EnvironmentVisualizer
+import random
 
 # Configure logging
 logging.basicConfig(
@@ -25,6 +27,7 @@ class DetectableObject:
         self.y = y
         self.color_id = color_id  # 0 for blue, 1 for green, 2 for red, 3 for star
         self.detection_probability = 0.0
+        self.detected = 0 # 0 or 1
         self._pixels = 0
         self._cx = 0
         self._cy = 0
@@ -43,15 +46,19 @@ class DetectableObject:
 class GridCell(DetectableObject):
     def __init__(self, x, y, color_id):
         super().__init__(x, y, color_id)
+       
     
-    def update_detection_probability(self, robot_state, max_range, obstacles,cam,bottom_fraction=1):
+    def update_detection_probability(self, robot_state, max_range, obstacles,cam,bottom_fraction=1,detection_factor = 1,max_speed = 20):
         """
         Update the probability that this cell is detected by the robot based on
         its position relative to the robot and the robot's gaze direction.
         """
-        self.detection_probability = 1
+        logger.debug(f"Processing cell: {self.x}, {self.y}, type: {self.color_id}")
+        self.detection_probability = 0
+        self.detected = 0
         sensor_width =cam.w_centre * 2 # Width of the camera sensor in pixels
         sensor_height = cam.h_centre * 2  # Height of the camera sensor in pixels
+        max_pixels = (sensor_width * sensor_height) / 6
         camera_h = cam.camera_h
         cam_elevation_angle = cam.camera_elevation_angle
         v_fov = cam.v_fov
@@ -60,6 +67,7 @@ class GridCell(DetectableObject):
         gaze_dir = (gaze_dir + 90) % 360
         if gaze_dir > 180:
                 gaze_dir -= 360  # Normalize to [-180, 180]
+        logger.debug(f"Robot state: {robot_state.x}, {robot_state.y}, gaze direction: {gaze_dir}")
 
         colored_square_side = 5
         half_square_width = colored_square_side / 2
@@ -80,20 +88,23 @@ class GridCell(DetectableObject):
 
         # Now compute the angle based on the rotated coordinates
         relative_angle_horizontal = math.degrees(math.atan2(rotated_y, rotated_x))
-
         angle_to_cell_vertical = math.degrees(math.atan2(camera_h, flat_distance))  # Vertical angle
         angle_to_cell_vertical = angle_to_cell_vertical*-1 - cam_elevation_angle
-    
-        self._pixels = max(0,  1 - (flat_distance - min_distance +  half_square_width)/(max_range-(min_distance+half_square_width))) # max pixels = 100
+        logger.debug(f"Angle to cell: {relative_angle_horizontal}, {angle_to_cell_vertical}")
+        self._pixels = max(0,  max_pixels *(1 - (flat_distance - min_distance +  half_square_width)/(max_range-(min_distance+half_square_width)))) 
+        logger.debug(f"Pixels: {self._pixels}")
+        self._pixels = min(max_pixels, self._pixels)
+        logger.debug(f"Pixels: {self._pixels}")
         angle_to_closest_point_vertical = math.degrees(math.atan2(camera_h, flat_distance-half_square_width)) *-1 
         angle_to_farthest_point_vertical = math.degrees(math.atan2(camera_h, flat_distance+half_square_width)) *-1 
         if angle_to_farthest_point_vertical< cam_elevation_angle-v_fov/2 or angle_to_closest_point_vertical> cam_elevation_angle+v_fov/2:
-            self.detection_probability = 0.0
+            # self.detection_probability = 0.0
             self._pixels = 0
+            logger.debug(f"Detection 0 for cell ({self.x}, {self.y}): Cell is outside vertical FOV. cam_elevation_angle: {cam_elevation_angle}, angle_to_closest_point_vertical: {angle_to_closest_point_vertical}, angle_to_farthest_point_vertical: {angle_to_farthest_point_vertical}")
             return
         elif abs(angle_to_closest_point_vertical)>abs(cam_elevation_angle-v_fov/2):
             self._pixels = self._pixels * (1-(abs(angle_to_closest_point_vertical)-abs(cam_elevation_angle-v_fov/2))/(abs(angle_to_closest_point_vertical)-abs(angle_to_farthest_point_vertical)))
-        
+            self._pixels = min(max_pixels, self._pixels)
         corners = [
             (self.x - half_square_width, self.y - half_square_width),  # bottom-left
             (self.x + half_square_width, self.y - half_square_width),  # bottom-right
@@ -128,12 +139,14 @@ class GridCell(DetectableObject):
         min_angle = min(abs(leftmost_angle),abs(rightmost_angle))
         max_angle =  max(abs(leftmost_angle),abs(rightmost_angle))
         if min_angle > abs(beta):
-            self.detection_probability = 0.0
+            # self.detection_probability = 0.0
             self._pixels = 0
+            logger.debug(f"Detection 0 for cell ({self.x}, {self.y}): Cell is outside horizontal FOV. beta: {beta}, smallest angle: {leftmost_angle}, largest angle: {rightmost_angle}")
             # print(f"Detection 0 for cell ({self.x}, {self.y}): Cell is outside horizontal FOV. beta: {beta}, smallest angle: {leftmost_angle}, largest angle: {rightmost_angle}")
             return  # Cell is outside horizontal FOV
         elif max_angle > abs(beta):
             self._pixels = self._pixels * (1-(max_angle-beta)/(max_angle-min_angle))
+            self._pixels = min(max_pixels, self._pixels)
         max_right_overlap = 0
         max_left_overlap = 0
         half_obs_width =3
@@ -160,7 +173,7 @@ class GridCell(DetectableObject):
                 leftmost_obs_angle, rightmost_obs_angle = min(obs_left_angle, obs_right_angle), max(obs_left_angle, obs_right_angle)
                 if leftmost_obs_angle <= leftmost_angle and rightmost_obs_angle>= rightmost_angle:
                     self._pixels = 0
-                    self.detection_probability = 0
+                    # self.detection_probability = 0
                     return
                 elif leftmost_angle <= leftmost_obs_angle and leftmost_obs_angle<= rightmost_angle:
                     right_overlap = abs(leftmost_obs_angle-rightmost_angle)/abs(leftmost_angle-rightmost_angle)
@@ -169,52 +182,146 @@ class GridCell(DetectableObject):
                 elif leftmost_angle <= rightmost_obs_angle and rightmost_obs_angle <= rightmost_angle:
                     left_overlap = abs(leftmost_angle-rightmost_obs_angle)/abs(leftmost_angle-rightmost_angle)
                     max_left_overlap= max(max_left_overlap,left_overlap)
-            
+        logger.debug(f"max_left_overlap: {max_left_overlap}, max_right_overlap: {max_right_overlap}")
         self._pixels = self._pixels * (1-max_left_overlap) * (1-max_right_overlap)
-        if self._pixels == 0:
-            self.detection_probability = 0
+        self._pixels = min(max_pixels, self._pixels)
+       
         
 
-        self._cx = (sensor_width / 2) * (1 + relative_angle_horizontal/ beta)
+        self._cx = (sensor_width / 2) * (1 + relative_angle_horizontal/ beta) 
         if self._cx>sensor_width:
             self._cx = sensor_width
         elif self._cx<-sensor_width:
             self._cx = -   sensor_width
         self._cy = (sensor_height / 2) * (1 + math.radians(angle_to_cell_vertical) / math.radians(v_fov / 2))
-        
-# Class for obstacles
+        logger.debug(f"cx: {self._cx}, cy: {self._cy}")
+        logger.debug(f"Pixels for cell ({self.x}, {self.y}): {self._pixels}")
+
+        if self._pixels>0:
+            if detection_factor ==1:
+                self.detection_probability = 1
+            else:
+                speed = abs(robot_state.l_speed + robot_state.r_speed)/2
+                normalized_speed = min(1.0, speed / max_speed)
+                normalized_pixels = min(1.0, obj._pixels / (sensor_width * sensor_height/6)) # max detection when the object covers 1/6 of the frame
+                self.detection_probability = detection_factor * (1-normalized_speed) * normalized_pixels
+        self.detected = 1 if random.random() <= self.detection_probability else 0
+    
+
 class Star(DetectableObject):
     def __init__(self, position):
-        self.positiom = position
-        self.color_id = 3
+        super().__init__(x = 0, y = 0, color_id = 3)
+        self.position = position
+
 
     def update_detection_probability(self, robot_state, max_range, obstacles, cam,bottom_fraction=1):
         """
         Calculate detection probability for obstacles (based on height and dimensions).
         """
-        self.x = 0
-        self.y = 0
         self.detection_probability = 0
+        self.detected = 0
         self._pixels = 0
         return 
     
 class Obstacle(DetectableObject):
     def __init__(self, x, y, height, color_id=2):
         super().__init__(x, y, color_id)
-        self.height = height
+        self.height = height  # Height of the obstacle
+        self.base_diameter = 5  # Diameter of the obstacle's base
 
-    def update_detection_probability(self, robot_state, max_range, obstacles, cam,bottom_fraction=1):
+    def update_detection_probability(self, robot_state, max_range, obstacles, cam, bottom_fraction=1,detection_factor = 1,max_speed = 20):
         """
-        Calculate detection probability for obstacles (based on height and dimensions).
+        Calculate detection probability for obstacles (based on trapezoidal approximation) and update _cx, _cy.
         """
-
+        logger.debug(f"Processing cell: {self.x}, {self.y}, type: {self.color_id}")
+        # self.detection_probability = 0
         self.detection_probability = 0
+        self.detected = 0
         self._pixels = 0
-        return 
+        self._cx = 0
+        self._cy = 0
+
+        # Camera and obstacle geometry
+        sensor_width = cam.w_centre * 2
+        sensor_height = cam.h_centre * 2
+        max_pixels = sensor_width*sensor_height 
+        camera_h = cam.camera_h
+        cam_elevation_angle = cam.camera_elevation_angle
+        v_fov = cam.v_fov
+        h_fov = cam.h_fov
+        gaze_dir = robot_state.theta + robot_state.phi
+        gaze_dir = (gaze_dir + 90) % 360
+        if gaze_dir > 180:
+            gaze_dir -= 360  # Normalize to [-180, 180]
+        logger.debug(f"Robot state: {robot_state.x}, {robot_state.y}, gaze direction: {gaze_dir}")
+        # Distance and angular position relative to the robot
+        dx = self.x - robot_state.x
+        dy = self.y - robot_state.y
+        flat_distance = math.sqrt(dx**2 + dy**2)
+
+        # Check if the obstacle is within max range
+        if flat_distance > max_range:
+            logger.debug(f"Grid cell too far: {flat_distance} > {max_range}")
+            return
+
+        # Calculate angles to the obstacle
+        center_angle_horizontal = math.degrees(math.atan2(dy, dx)) - gaze_dir
+        if center_angle_horizontal > 180:
+            center_angle_horizontal -= 360
+        if center_angle_horizontal < -180:
+            center_angle_horizontal += 360
+
+        top_angle = math.degrees(math.atan2(self.height, flat_distance))
+        bottom_angle = math.degrees(math.atan2(0, flat_distance)) - cam_elevation_angle
+
+        # Check if the obstacle is within the FOV
+        if abs(center_angle_horizontal) > h_fov / 2 or top_angle < cam_elevation_angle - v_fov / 2:
+            logger.debug(f"Obstacle outside FOV: {center_angle_horizontal}, {top_angle}")
+            return
+
+        # Adjust visible height if it exceeds the FOV
+        visible_top = min(top_angle, cam_elevation_angle + v_fov / 2)
+        visible_bottom = max(bottom_angle, cam_elevation_angle - v_fov / 2)
+        visible_height = max(0, visible_top - visible_bottom)
+        logger.debug(f"Visible height: {visible_height}")
+        # Adjust visible width if it exceeds the FOV
+        left_angle = center_angle_horizontal - (self.base_diameter / (2 * flat_distance))
+        right_angle = center_angle_horizontal + (self.base_diameter / (2 * flat_distance))
+        visible_left = max(-h_fov / 2, left_angle)
+        visible_right = min(h_fov / 2, right_angle)
+        visible_width = max(0, visible_right - visible_left)
+        logger.debug(f"Visible width: {visible_width}")
+        # Calculate pixel representation
+        # self._pixels = visible_height * (visible_width / h_fov)
+        self._pixels = max_pixels * (visible_height / v_fov) * (visible_width / h_fov)
+        self._pixels = min(max_pixels, self._pixels)
+        logger.debug(f"Pixels: {self._pixels}")
+        # Normalize the pixel value to a probability
+        # self.detection_probability = min(1.0, max(0.0, self._pixels / (sensor_width * sensor_height)))
+
+        # Calculate _cx and _cy (center of the obstacle in the image frame)
+        self._cx = (sensor_width / 2) * (1 + center_angle_horizontal / (h_fov / 2))
+        self._cy = (sensor_height / 2) * (1 + (cam_elevation_angle - (visible_top + visible_bottom) / 2) / (v_fov / 2))
+
+        # Ensure _cx and _cy are within the image bounds
+        self._cx = max(0, min(sensor_width, self._cx))
+        self._cy = max(0, min(sensor_height, self._cy))
+        logger.debug(f"cx: {self._cx}, cy: {self._cy}")
+
+        if self._pixels>0:
+            if detection_factor ==1:
+                self.detection_probability = 1
+            else:
+                speed = abs(robot_state.l_speed + robot_state.r_speed)/2
+                normalized_speed = min(1.0, speed / max_speed)
+                normalized_pixels = min(1.0, obj._pixels / (sensor_width * sensor_height/2)) # max detection when the object covers 1/6 of the frame
+                self.detection_probability = detection_factor * (1-normalized_speed) * normalized_pixels
+        self.detected = 1 if random.random() <= self.detection_probability else 0
+
 
 # The environment and simulation class
 class Environment:
-    def __init__(self, task="RoboNav", starting_pos=(0, 0, 0, 0), target_pos=(1, 5), obstacles=[],star_position = 1, log_level=logging.INFO):
+    def __init__(self, task="RoboNav", starting_pos=(0, 0, 0, 0), target_pos=(1, 5), obstacles=[],star_position = 1, log_level=logging.INFO,detection_factor = 1,servo_error = 0, pan_error = 0):
         # Set logging level
         logger.setLevel(log_level)
         
@@ -225,8 +332,11 @@ class Environment:
         self.starting_pos = starting_pos  # Starting position
         self.target = target_pos
         self.obstacles = []
+        self.servo_error = servo_error
+        self.pan_error = pan_error
         self.robot = Robot(self)
         self.star = Star(position = star_position)
+        self.detection_factor = detection_factor
 
         # Initialize grid cells
         self.grid = np.empty(self.grid_size, dtype=object)
@@ -245,8 +355,8 @@ class Environment:
         self.detectable_objects = []
         self.detectable_objects.extend(self.grid.flatten())
         self.detectable_objects.extend(self.obstacles)
-        self.detectable_objects.append(self.star)
-        self.show_frames = True
+        # self.detectable_objects.append(self.star)
+        # self.show_frames = True
 
         self.visualizer = EnvironmentVisualizer(self)
 
@@ -270,6 +380,7 @@ class Environment:
                 'y': round(obj.y, 3),
                 'type': obj.color_id,  # Type of object (GridCell, Obstacle)
                 'detection_probability': round(obj.detection_probability, 3),
+                'detected': obj.detected,
                 'pixels':  round(obj._pixels, 3)
             })
 
@@ -285,7 +396,7 @@ class Environment:
             'gaze': round(self.robot.state.phi, 3)
         })
 
-    def run_simulation(self, speed=0.2, bias=0, max_sim_time=5, time_step=0.02, task="RoboNav",show_frames = False):
+    def run_simulation(self, speed=0.2, bias=0, max_sim_time=5, time_step=0.02, task="RoboNav", frame_buffer = True):
         """
         Run the simulation for a specified amount of time.
         """
@@ -295,14 +406,40 @@ class Environment:
         self.sim_time = 0
         self.robot_states = []
         self.snapshot_data = []
-        self.show_frames = show_frames
+        self.robot.cam.set_frame_delay(frame_buffer) 
         if task == "RoboNav":
             self.robot.RoboNav(speed, bias)
 
         # Log data at the end of simulation
         self.save_to_csv()
 
-    def take_snapshot(self, robot_state, max_range=45, bottom_fraction=1):
+    def update_time(self, delta_t = None):
+        if delta_t is None:
+            delta_t = self.delta_t
+        # self.set_speed(self.curr_l_speed, self.curr_r_speed,self.robot.cam.env.delta_t)
+        v_left,v_right = self.robot.state.get_speed()
+        v = (v_left + v_right) / 2  # Linear velocity
+        omega = (v_right - v_left) / self.robot.WHEEL_BASE  # Angular velocity
+
+        # Update position and orientation
+        delta_theta = math.degrees(omega * delta_t)
+        
+        delta_x = -v * math.sin(math.radians(self.robot.state.get_orientation())) * delta_t * 100  # Convert to cm 
+        delta_y = v * math.cos(math.radians(self.robot.state.get_orientation())) * delta_t * 100 
+
+        
+
+        self.sim_time += delta_t
+        # Update the robot's state (phi remains fixed unless changed externally)
+        self.robot.state.update(delta_x, delta_y, delta_theta,0,v_left,v_right) ####
+        self.log_robot_state()
+        if self.sim_time >= self.max_sim_time:
+            # log data
+            self.robot.cam.env.save_to_csv()
+            raise TimeoutError("Simulation time exceeded")
+        return
+
+    def take_snapshot(self, robot_state, max_range=40, bottom_fraction=1, frame_delay = 0):
         """
         Update detection probabilities for all detectable objects.
         """
@@ -313,16 +450,13 @@ class Environment:
 
         # Update detection for all objects
         for obj in self.detectable_objects:
-            obj.update_detection_probability(robot_state, max_range, self.obstacles, self.robot.cam, bottom_fraction)
+            obj.update_detection_probability(robot_state, max_range, self.obstacles, self.robot.cam, bottom_fraction,detection_factor = self.detection_factor,max_speed = self.robot.servo.max_speed)
 
         # Log detection probabilities
-        if hasattr(self, "max_sim_time"):
-            self.log_detection_probabilities()
-            
-        # Modify this part to use the visualizer
-        if self.show_frames:
-            self.visualizer.draw_view(robot_state)
-            
+        self.log_detection_probabilities()
+     
+        self.update_time(frame_delay)
+        # self.sim_time+= 0.001 # not tested yet, random value
         return self.detectable_objects, self
 
     def save_to_csv(self):
@@ -339,7 +473,7 @@ class Environment:
 
         # Save detection probabilities (snapshots)
         with open('snapshots.csv', mode='w', newline='') as snapshot_file:
-            fieldnames = ['time', 'x', 'y', 'type', 'detection_probability',"pixels"]
+            fieldnames = ['time', 'x', 'y', 'type', 'detection_probability',"detected","pixels"]
             writer = csv.DictWriter(snapshot_file, fieldnames=fieldnames)
             writer.writeheader()
             for snapshot in self.snapshot_data:
