@@ -7,14 +7,6 @@ from dataclasses import dataclass
 from typing import Tuple, List
 import logging
 
-'''
-TBD: 
-- make servo error more conistent throughout one simulation run
-check with real robot pixel number, angles, etc
-- taking frames during movement -> implemented  
-- pixels, detection probability - verify for new robot + mirrored image; cropping from rotation
-
-'''
 
 @dataclass
 class TestCase:
@@ -22,17 +14,18 @@ class TestCase:
     obstacles: List[Tuple[int, int]]
     starting_pos: Tuple[int, int, int, int]
     target_pos: Tuple[int, int]
-    speed: float = 0.2
+    speed: float = 0.1
     bias: float = 0
-    max_sim_time: float = 50
-    time_step: float = 0.01
-    show_frames: bool = False
+    max_sim_time: float = 50 # s
+    time_step: float = 0.01 # s
     task: str = "RoboNav"
     log_level: int = logging.INFO
-    detection_factor: float = 1.0
-    servo_error: float = 0 
-    pan_error: float = 0 # deg
+    detection_factor: float = 1.0 # max = 1
+    servo_error: float = 0 # (0/1/2/3: servo_noise sd will be 0.001*servo_error)
+    pan_error: float = 0 # sd of pan angle in deg
     frame_buffer: bool = False
+    pan_delay: float = 0 # time it takes for the mirror to move 1 deg
+    speed_coef: float = 2 # can be used to tune speed of the robot - speed = speed * speed_coef
 
 def run_test(test_case: TestCase):
     """Run a single test case and plot results"""
@@ -44,7 +37,8 @@ def run_test(test_case: TestCase):
         log_level=test_case.log_level,
         detection_factor = test_case.detection_factor,
         servo_error = test_case.servo_error,
-        pan_error = test_case.pan_error
+        pan_error = test_case.pan_error,
+        pan_delay = test_case.pan_delay
     
     )
     
@@ -57,12 +51,12 @@ def run_test(test_case: TestCase):
             time_step=test_case.time_step,
             task=test_case.task,
             frame_buffer=test_case.frame_buffer
+            
         )
     except TimeoutError as e:
         print(f"Simulation terminated: {e}")
     finally:
         # Ensure animate_trajectory runs even if run_simulation fails
-        # logger.info("Animating trajectory...")
         env.visualizer.animate_trajectory(test_case.obstacles, 'robot_states.csv', frame_skip=10)
 
     return env
@@ -76,9 +70,8 @@ TEST_CASES = {
         target_pos=(3,5),
         log_level=logging.INFO,
         detection_factor = 1, 
-        servo_error = 0, # (0/1/2/3: servo_noise sd will be 0.01*servo_error)
-        frame_buffer = False,
-        pan_error = 0.1
+        servo_error = 0, 
+        pan_error = 0
     ),
     "simple_obstacle": TestCase(
         obstacles=[(1, 2), (0, 3), (2, 1), (1, 4)],
@@ -87,9 +80,8 @@ TEST_CASES = {
         target_pos=(0,5),
         log_level=logging.INFO,
         detection_factor = 1,
-        servo_error = 0, # (0/1/2/3: servo_noise sd will be 0.01*servo_error)
-        frame_buffer = False,
-        pan_error = 0.1
+        servo_error = 0, 
+        pan_error = 0
     ),
     "offset_start": TestCase(
         obstacles=[(1, 2), (0, 3), (2, 1)],
@@ -98,9 +90,18 @@ TEST_CASES = {
         target_pos=(0,5),
         log_level=logging.INFO,
         detection_factor = 1,
-        servo_error = 0, # (0/1/2/3: servo_noise sd will be 0.01*servo_error)
-        frame_buffer = False,
-        pan_error = 0.1
+        servo_error = 0, 
+        pan_error = 0
+    ),
+    "L": TestCase(
+        obstacles=[(2, 1), (2, 2), (2, 3), (2, 4)],
+        # obstacles=[ (0, 3), (2, 1)],
+        starting_pos=(3,0,0,0),
+        target_pos=(0,5),
+        log_level=logging.INFO,
+        detection_factor = 1,
+        servo_error = 0,
+        pan_error = 0
     )
 }
 

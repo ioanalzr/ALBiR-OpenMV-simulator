@@ -1,3 +1,7 @@
+'''
+    If you added functions to the Servo class in servos.py, make sure you add it to the Servo class below
+'''
+
 import random 
 import math
 import logging
@@ -86,23 +90,22 @@ class State:
 class Servo:
     """
     A class responsible for controlling servos via the PCA9685 controller.
+    If you added functions to the Servo class in servos.py, make sure you add it here.
     """
 
-    def __init__(self, robot, servo_error = 0, pan_error = 0):
+    def __init__(self, robot, servo_error = 0, pan_error = 0, pan_delay = 0, speed_coef = 2):
         """
         Initialise the servo object and sets the tuning coefficients.
         """
         self.robot = robot
-        # self.robot.state = State(self.robot.cam.env.starting_pos[0] * self.robot.cam.env.square_size + self.robot.cam.env.square_size / 2,
-        #                    self.robot.cam.env.starting_pos[1] * self.robot.cam.env.square_size + self.robot.cam.env.square_size / 2, 0)
 
-        # Servo tuning coefficients
+        # Servo tuning coefficients - not used in the simulation
 
         self.left_zero = 0.1
         self.right_zero = -0.1
 
         # Set up servo angle limits
-        self.degrees = 90
+        self.degrees = 180 # ensure it is the same as in servos.py
         self.min_deg = -self.degrees / 2
         self.max_deg = self.degrees / 2
 
@@ -112,22 +115,10 @@ class Servo:
 
         self.noise_std = servo_error*0.001
         self.pan_error_std = pan_error # deg
-        self.pan_delay = 0 #s
+        self.pan_delay = pan_delay # time it takes to move mirror by 1 deg
+        self.coef = speed_coef
 
         self.max_speed = 2
-        
-        # self.freq = 50
-        # self.period = 1000000 / self.freq
-
-        # # Calculate duty cycles for PWM signal range
-        # self.min_duty = self._us2duty(700)
-        # self.max_duty = self._us2duty(2300)
-        # self.mid_duty = (self.min_duty + self.max_duty) / 2
-        # self.span = (self.max_duty - self.min_duty)
-
-        # # Initialise the PCA9685 controller for I2C communication
-        # self.pca9685 = pca9685.PCA9685(SoftI2C(sda=Pin('P5'), scl=Pin('P4')), 0x40)
-        # self.pca9685.freq(self.freq)
 
         self.left_id = 4
         self.right_id = 5
@@ -135,11 +126,10 @@ class Servo:
 
 
     def set_differential_drive(self, speed: float, bias: float) -> None:
-        bias = bias*-1
-        coeff = 1
-        speed = speed* coeff
-        speed = max(min(speed, 10), 0)
-        bias = max(min(bias, 10), -1)
+        bias = bias*-1 # why
+        speed = speed * self.coef
+        speed = max(min(speed, self.max_speed*self.coef), 0)
+        bias = max(min(bias, 1), -1)
         left_speed = speed * (1 - bias)
         right_speed = speed * (1 + bias)
         max_speed = max(abs(left_speed), abs(right_speed))
@@ -157,39 +147,6 @@ class Servo:
         while elapsed_time < total_time:
             self.robot.cam.env.update_time()
             elapsed_time += self.robot.cam.env.delta_t
-            # if self.robot.cam.env.sim_time >= self.robot.cam.env.max_sim_time:
-            #     # log data
-            #     self.robot.cam.env.save_to_csv()
-            #     raise TimeoutError("Simulation time exceeded")
-        return
-
-    def sleep_ms_simulated_old(self, ms: int) -> None:
-        total_time = ms / 1000.0
-        elapsed_time = 0
-
-        while elapsed_time < total_time:
-            logger.debug(f"Simulation time elapsed: {elapsed_time}")
-            # self.set_speed(self.curr_l_speed, self.curr_r_speed,self.robot.cam.env.delta_t)
-            v_right,v_left = self.robot.state.get_speed()
-            v = (v_left + v_right) / 2  # Linear velocity
-            omega = (v_right - v_left) / self.robot.WHEEL_BASE  # Angular velocity
-
-            # Update position and orientation
-            delta_theta = math.degrees(omega * delta_t)
-            
-            delta_x = -v * math.sin(math.radians(self.robot.state.get_orientation())) * delta_t * 100  # Convert to cm
-            delta_y = v * math.cos(math.radians(self.robot.state.get_orientation())) * delta_t * 100 
-
-            # Update the robot's state (phi remains fixed unless changed externally)
-            self.robot.state.update(delta_x, delta_y, delta_theta,0,v_left,v_right) ####
-            self.robot.cam.env.log_robot_state()
-  
-            elapsed_time += self.robot.cam.env.delta_t
-            self.robot.cam.env.sim_time += self.robot.cam.env.delta_t
-            if self.robot.cam.env.sim_time >= self.robot.cam.env.max_sim_time:
-                # log data
-                self.robot.cam.env.save_to_csv()
-                raise TimeoutError("Simulation time exceeded")
         return
 
     def set_spin(self, speed: float) -> None:
@@ -228,21 +185,14 @@ class Servo:
         # Constrain angle to the limits
         angle = max(min(angle, self.max_deg), self.min_deg) # the recorded angle
         delta_angle = angle - self.robot.state.get_gaze()
-        # if abs(delta_angle)<1:
-        #      delta_angle_noisy = 0
-        # else:
         delta_angle_noisy = random.gauss(delta_angle, self.pan_error_std) # actual angle is different 
-        # Update the pan angle
-        # add noise to pan
-        # delta_angle_noisy = delta_angle
-        ## self.robot.state.update(0,0,0,delta_angle_noisy) 
-        ## self.pan_pos = self.robot.state.get_gaze()  ### what is this for - bcs servo.pan_pos was in the initial code
         self.pan_pos= angle
         self.robot.cam.env.update_time(self.pan_delay*abs(delta_angle_noisy))
         self.robot.state.update(0,0,0,delta_angle_noisy)
         
 
         return angle # return recorded angle not actual
+    
     def calculate_noise(self,noise_std,speed):
                 # Avoid division by zero, and set higher noise at slower speeds
                 return noise_std / max(abs(speed), 0.1)  # Prevent division by zero with max()
@@ -269,9 +219,6 @@ class Servo:
         self.robot.state.update(0,0,0,0,l_speed_noisy,r_speed_noisy ) 
         
         
-
-
-
     def _duty2us(self, value: float) -> int:
         """
         Convert a given PWM duty cycle value to microseconds.
