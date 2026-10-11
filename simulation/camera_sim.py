@@ -16,23 +16,25 @@ class Cam(object):
         """
         self.robot = robot
         self.env = env
-        self.frame_delay = 0
-     
-        # Initialise sensor properties
-        self.w_centre = 160 # pixels
-        self.h_centre = 120 # pixels
-        self.h_fov = 70.8 # degrees
-        self.v_fov = 55.6 # degrees
-        self.camera_elevation_angle = -11 
-        self.camera_h = 8
+        self.frame_delay = 0 
+
+        # Initialise sensor properties - can edit these
+        self.w_centre = 320 # pixels
+        self.h_centre = 240 # pixels
+        self.h_fov = 31.5 # degrees
+        self.v_fov = 21 # degrees
+        self.camera_elevation_angle = -15# degrees
+        self.camera_h = 7 # cm
+        self.max_distance = 40 # cm 
+        self.min_distance = 10 # cm
 
     def set_frame_delay(self, frame_buffer):
         if frame_buffer:
-            self.frame_delay = 0.01
+            self.frame_delay = 0.02 # time it takes to take a frame when frame_buffer is on
         else:
-            self.frame_delay = 0.001
+            self.frame_delay = 0.001 # time it takes to take a frame when frame_buffer is off
 
-    def get_blobs(self) -> tuple:
+    def get_blobs(self, index = None, angle = 0) -> tuple:
         """
         Capture an image and detect color blobs based on predefined thresholds.
 
@@ -41,12 +43,17 @@ class Cam(object):
             img (image): Captured image used to find blobs.
         """
         blobs, img = self.env.take_snapshot(self.robot.state, frame_delay = self.frame_delay)
-        blobs = [blob for blob in blobs if blob.detected == 1]
+        if index is not None:
+            blobs = [blob for blob in blobs if blob.detected == 1 and blob.color_id == index]
+        else:
+            blobs = [blob for blob in blobs if blob.detected == 1 and blob.color_id in [0, 1, 2, 3]]
+
         return blobs, img
+     
 
 
 
-    def get_blobs_bottom(self,index = None,max_range = 40) -> tuple:
+    def get_blobs_bottom(self,index = None, angle = 0,max_range = 20) -> tuple:
         """
         Capture an image and detect color blobs based on predefined thresholds.
 
@@ -55,24 +62,14 @@ class Cam(object):
             img (image): Captured image used to find blobs.
         """
 
-        blobs, img = self.env.take_snapshot(self.robot.state, max_range=max_range, bottom_fraction=1, frame_delay = self.frame_delay)
+        blobs, img = self.env.take_snapshot(self.robot.state, max_range=max_range, frame_delay = self.frame_delay)
     
     
-        # # Log before filtering
-        # logger.debug("Before filtering blobs:")
-        # for blob in blobs:
-        #     logger.debug(f"Blob - Detected: {blob.detected}, Color ID: {blob.color_id}, Pixels: {blob._pixels}")
-
-        # Filter blobs
+    
         if index is not None:
             blobs = [blob for blob in blobs if blob.detected == 1 and blob.color_id == index]
         else:
             blobs = [blob for blob in blobs if blob.detected == 1 and blob.color_id in [0, 1, 2, 3]]
-
-        # # Log after filtering
-        # logger.debug("After filtering blobs:")
-        # for blob in blobs:
-        #     logger.debug(f"Blob - Detected: {blob.detected}, Color ID: {blob.color_id}, Pixels: {blob._pixels}")
 
         return blobs, img
 
@@ -111,7 +108,7 @@ class Cam(object):
         colours = []
 
         for blob in blobs:
-            colours.append(blob.index)
+            colours.append(blob.color_id)
 
         return colours
 
