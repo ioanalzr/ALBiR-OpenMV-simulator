@@ -1,6 +1,6 @@
 # ALBiR-OpenMV-teaching-platform
 
-The robotsim environment helps testing the code for operating the OpenMV differential drive robot used as a teaching platform in the maze assignment of the MEng module Animal Locomotion and Bioinspired. 
+The robotsim environment helps testing the code for operating the OpenMV differential drive robot used in the maze assignment of the MEng module Animal Locomotion and Bioinspired. 
 
 The functions defined in robot.py to drive the robot can be plugged into robot_sim.py (follow instructions at the top of the script). The modules that drive the physical servos and interact with the camera module of the robot (servos.py and camera.py) are replaced by modules which interact with a simulated environment, updating the state of the robot in the environment (servos_sim.py) and estimating its view (size, colour, and detection probability) of the maze objects based on geometry (camera_sim.py). 
 
